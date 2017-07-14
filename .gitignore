@@ -1,0 +1,5 @@
+
+.idea/
+build/
+pygraphicst.egg-info/
+/pygraphicst/_wcwidth.cpython-36m-x86_64-linux-gnu.so
