@@ -6,6 +6,7 @@ import typing
 from typing import Callable as _Callable
 
 import pygraphicst.constants as constants
+import pygraphicst.wcwidth as wcwidth
 
 N = typing.TypeVar('N', int, float)
 
@@ -56,12 +57,11 @@ class Logger:
 
 class Canvas:
     def draw_str(
-            self, string: str, x_left: int = 0, y_top: int = 0,
-            absolute=True, overflow: bool = True, length=0,
+            self, string: str, x_left: int = 0, y_top: int = 0, length=0,
             attr=constants.Attibute.NORMAL,
             color_f: int = constants.Color.DEFAULT,
             color_b: int = constants.Color.DEFAULT
-    ) -> int:
+    ):
         pass
 
     def draw_border(self):
@@ -293,113 +293,37 @@ class Window:
                 self.cursor = (0, 0)
 
             def draw_str(
-                    self, string: str, x_left: int = 0, y_top: int = 0, absolute=True,
-                    wrap: bool = True, overflow: bool = True, length=0,
+                    self, string: str, x_left: int = 0, y_top: int = 0,
+                    wrap: bool = True, length=0,
                     attr=constants.Attibute.NORMAL,
                     color_f: int = constants.Color.DEFAULT,
                     color_b: int = constants.Color.DEFAULT
-            ) -> int:
-                if not wrap:
-                    win = self._temp
-                    at = attr | curses.color_pair(self._window._color(color_f, color_b))
-                    x_mod = 0
-
-                    # calculate draw position
-                    y_draw = y_top + self.y_start + (0 if absolute else self.cursor[1])
-                    x_draw = x_left + self.x_start + (0 if absolute else self.cursor[0])
-
-                    # calculate boundary
-                    if length <= 0:
-                        xs = self.x_size
-                    else:
-                        xs = min(self.x_start + x_left + length, self.x_size)
-                        if xs < 3 and x_left < 0:
-                            raise ValueError('No place to calculate render size.')
-
-                    ys = 1 + y_draw
-
-                    # cut string to screen
-                    if x_draw >= 0:
-                        s = string
-                    else:
-                        if not overflow:
-                            raise ValueError('Content overflows.')
-
-                        offset = 0
-                        index = -1
-
-                        # calculate left hidden length
-                        for i in range(len(string)):
-                            win.resize(y_draw + 1, 3)
-                            win.move(y_draw, 0)
-                            win.addstr(string[i])
-                            y, x = win.getyx()
-                            offset += x
-                            if offset >= -x_draw:
-                                index = i
-                                break
-
-                        # get str to draw and clear draft
-                        if index == -1:
-                            win.move(y_draw, 0)
-                            win.addstr('  ', at)
-                            self.cursor = (x_draw + offset, y_draw)
-                            return 0
-                        else:
-                            s = ((offset + x_draw) * ' ') + string[index + 1:]
-                            if len(s) < 2:
-                                x_mod = 2 - len(s)
-                                s += x_mod * ' '
-
-                            x_draw = 0
-
-                    # draw
-                    if 0 <= x_draw < self.x_size and 0 <= y_draw < self.y_size:
-                        c = 0
-                        try:
-                            win.resize(ys, xs)
-                            win.move(y_draw, x_draw)
-
-                            for i in s:
-                                win.addstr(i, at)
-                                c += 1
-
-                            self._window._window.refresh()
-                        except curses.error as e:
-                            if not overflow:
-                                raise ValueError('Position not allowed.') from e
-                        finally:
-                            win.refresh()
-                            y, x = win.getyx()
-                            self.cursor = (x - self.x_start - x_mod, y - self.y_start)
-                            return c
-                    else:
-                        if not overflow:
-                            raise ValueError('Content overflows.')
-                        else:
-                            return 0
-                # wrap
+            ):
+                # get values
+                at = attr | curses.color_pair(self._window._color(color_f, color_b))
+                y_draw = y_top + self.y_start
+                x_draw = x_left + self.x_start
+                length = length if length != 0 else self.x_size - x_draw
+                # split to lines
+                strs = wcwidth.split(string, -1 if not wrap else length)
+                # cut to canvas size
+                if x_draw < 0:
+                    for i in range(len(strs)):
+                        strs[i] = wcwidth.slise(strs[i], -x_draw, self.x_size)
                 else:
-                    # x check
-                    if not overflow:
-                        x_draw = x_left + self.x_start + (0 if absolute else self.cursor[0])
-                        if not 0 < x_draw < (self.x_size - length):
-                            raise ValueError('Content overflows.')
+                    for i in range(len(strs)):
+                        strs[i] = wcwidth.slise(strs[i], 0, self.x_size - x_draw)
+                # move cursor after cutting
+                x_draw = max(0, x_draw)
+                # draw strings
+                self._temp.resize(self.y_size, self.x_size)
+                for i in strs:
+                    if y_draw == self.y_size:
+                        self._temp.refresh()
+                        break
 
-                    l = len(string)
-                    c = self.cursor
-                    while l > 0:
-                        self.cursor = c
-                        y_draw = y_top + self.y_start + (0 if absolute else self.cursor[1])
-                        if 0 <= y_draw < self.y_size:
-                            i = self.draw_str(
-                                string[-l:], x_left, y_top, absolute=absolute, wrap=False, length=length,
-                                attr=attr, color_f=color_f, color_b=color_b)
-                            l -= i
-                            y_top += 1
-                        elif overflow:
-                            raise ValueError('Content overflows.')
-                            # TODO
+                    self._temp.addstr(y_draw, x_draw, i, at)
+                    y_draw += 1
 
             def draw_border(self):
                 self._temp.resize(self.y_size, self.x_size)

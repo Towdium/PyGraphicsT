@@ -21,8 +21,8 @@ def f1():
 
     class WTest(gpx.Widget):
         def on_draw(self) -> None:
-            self.canvas.draw_str('啊黄浦', x_left=-5, wrap=False)
-            self.canvas.draw_str('黑龙江凯撒酱立刻到工具栏；可视角度复合控件；口脚镣手铐甲胺磷；圣诞节风口浪尖撒离开家岛风', x_left=-1, wrap=True, absolute=False)
+            self.canvas.draw_str('啊黄浦', x_left=-2, wrap=False)
+            self.canvas.draw_str('黑龙江凯撒酱立刻到工具栏；可视角度复合控件；口脚镣手铐甲胺磷；圣诞节风口浪尖撒离开家岛风', length=6, x_left=-1, wrap=True)
 
     f = [True]
     ws = gpx.WStatus()
