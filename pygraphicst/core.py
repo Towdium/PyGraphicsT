@@ -1,14 +1,14 @@
-import curses
-import curses.ascii as ascii
-import math
-import time
-import typing
+import curses as _curses
+import curses.ascii as _ascii
+import math as _math
+import time as _time
+import typing as _typing
 from typing import Callable as _Callable
 
-import pygraphicst.constants as constants
-import pygraphicst.wcwidth as wcwidth
+import pygraphicst.constants as _constants
+import pygraphicst.wcwidth as _wcwidth
 
-N = typing.TypeVar('N', int, float)
+N = _typing.TypeVar('N', int, float)
 
 
 def _dist(items, exe):
@@ -30,18 +30,18 @@ def _call(e):
 class Timer:
     def __init__(self, ms: int, exe):
         self.frequency = ms / 1000
-        self.next = time.time() + self.frequency
+        self.next = _time.time() + self.frequency
         self.exe = exe
 
     def trigger(self):
-        t = time.time()
+        t = _time.time()
         if t >= self.next:
             self.exe()
             while self.next <= t:
                 self.next += self.frequency
 
     def reset(self):
-        self.next = time.time() + self.frequency
+        self.next = _time.time() + self.frequency
 
 
 class Logger:
@@ -58,9 +58,9 @@ class Logger:
 class Canvas:
     def draw_str(
             self, string: str, x_left: int = 0, y_top: int = 0, length=0,
-            attr=constants.Attibute.NORMAL,
-            color_f: int = constants.Color.DEFAULT,
-            color_b: int = constants.Color.DEFAULT
+            attr=_constants.Attibute.NORMAL,
+            color_f: int = _constants.Color.DEFAULT,
+            color_b: int = _constants.Color.DEFAULT
     ):
         pass
 
@@ -74,7 +74,7 @@ class Canvas:
         pass
 
     @property
-    def xy_position(self) -> typing.Tuple[int, int]:
+    def xy_position(self) -> _typing.Tuple[int, int]:
         return 0, 0
 
 
@@ -88,11 +88,13 @@ class Widget:
     def on_refresh(self) -> None:
         pass
 
+    # return if the event should be consumed
     def on_key(self, ch) -> bool:
         return False
 
-    def on_mouse(self, x, y, state) -> None:
-        pass
+    # return if the event should be consumed
+    def on_mouse(self, x, y, state) -> bool:
+        return False
 
     def on_canvas(self, canvas: Canvas) -> None:
         self.canvas = canvas
@@ -146,7 +148,7 @@ class Window:
             try:
                 self._window.get_wch()
                 break
-            except curses.error:
+            except _curses.error:
                 pass
 
         if log:
@@ -160,31 +162,31 @@ class Window:
     def log(self, s, type_=0, delay=False):
         self.logger.log(s, type_)
         if delay:
-            time.sleep(0.4)
+            _time.sleep(0.4)
 
     def serve(self, cond: _Callable):
-        c = curses.KEY_RESIZE
-        t = time.time() + self.period
+        c = _curses.KEY_RESIZE
+        t = _time.time() + self.period
 
         def run():
             # mouse event
-            if c == curses.KEY_MOUSE:
+            if c == _curses.KEY_MOUSE:
                 try:
-                    _, x, y, _, state = curses.getmouse()
+                    _, x, y, _, state = _curses.getmouse()
 
                     def f(w: Widget):
                         xw, yw = w.xy_position
-                        w.on_mouse(x - xw, y - yw, state)
-                        return True
+                        return w.on_mouse(x - xw, y - yw, state)
 
-                    _dist(self._widgets, f)
-                    _dist(self.mouse_lsnr, lambda l: l(x, y, state))
+                    if not _dist(self._widgets, f):
+                        _dist(self.mouse_lsnr, lambda l: l(x, y, state))
+                        self.focus = None
 
-                except curses.error:
+                except _curses.error:
                     pass
 
             # resize event
-            elif c == curses.KEY_RESIZE:
+            elif c == _curses.KEY_RESIZE:
                 self._window.clear()
                 y, x = self._window.getmaxyx()
                 _dist(self._widgets, _call(lambda w: w.on_layout(x, y)))
@@ -199,7 +201,7 @@ class Window:
         while True:
             self.dirty = False
 
-            if c != constants.Key.ERR:
+            if c != _constants.Key.ERR:
 
                 # enter unify
                 if c == '\r':
@@ -208,14 +210,14 @@ class Window:
                 run()
 
                 if self.dirty:
-                    c = curses.KEY_RESIZE
+                    c = _curses.KEY_RESIZE
                     continue
 
             if not cond():
                 break
 
-            # time check
-            td = t - time.time()
+            # _time check
+            td = t - _time.time()
             if td <= 0:
                 _dist(self._widgets, lambda w: w.on_refresh())
                 t += self.period
@@ -225,13 +227,13 @@ class Window:
                     t += self.period
                     td += self.period
 
-            timeout = math.ceil(td * 1000)
+            timeout = _math.ceil(td * 1000)
             self._window.timeout(timeout)
 
             try:
                 c = self._window.get_wch()
-            except curses.error:
-                c = constants.Key.ERR
+            except _curses.error:
+                c = _constants.Key.ERR
 
     def initialize(self):
         if Window.INSTANCE is not None:
@@ -243,31 +245,31 @@ class Window:
             for a in range(-1, 15):
                 for b in range(-1, 15):
                     if a != -1 or b != -1:
-                        curses.init_pair(self._color(a, b), a, b)
+                        _curses.init_pair(self._color(a, b), a, b)
 
-        self._window = curses.initscr()
+        self._window = _curses.initscr()
         self._window.keypad(True)
         self._window.timeout(1000)
-        curses.noecho()
-        curses.cbreak()
-        curses.mouseinterval(1)
-        curses.mousemask(0 | curses.BUTTON1_PRESSED | curses.BUTTON1_RELEASED)
-        curses.curs_set(0)
+        _curses.noecho()
+        _curses.cbreak()
+        _curses.mouseinterval(1)
+        _curses.mousemask(0 | _curses.BUTTON1_PRESSED | _curses.BUTTON1_RELEASED)
+        _curses.curs_set(0)
 
         try:
-            curses.start_color()
-            curses.use_default_colors()
+            _curses.start_color()
+            _curses.use_default_colors()
             init_color()
-        except curses.error:
+        except _curses.error:
             pass
 
     def terminate(self):
         Window.INSTANCE = None
         self._window.keypad(0)
-        curses.echo()
-        curses.nocbreak()
-        curses.curs_set(1)
-        curses.endwin()
+        _curses.echo()
+        _curses.nocbreak()
+        _curses.curs_set(1)
+        _curses.endwin()
 
     @staticmethod
     def _color(fg, bg):
@@ -286,7 +288,7 @@ class Window:
                 self.y_size = y if y_size == 0 else y_size
                 try:
                     self._temp.resize(self.y_size, self.x_size)
-                except curses.error:
+                except _curses.error:
                     raise ValueError('Size exceeds.')
                 self.x_start = x_start
                 self.y_start = y_start
@@ -295,35 +297,37 @@ class Window:
             def draw_str(
                     self, string: str, x_left: int = 0, y_top: int = 0,
                     wrap: bool = True, length=0,
-                    attr=constants.Attibute.NORMAL,
-                    color_f: int = constants.Color.DEFAULT,
-                    color_b: int = constants.Color.DEFAULT
+                    attr=_constants.Attibute.NORMAL,
+                    color_f: int = _constants.Color.DEFAULT,
+                    color_b: int = _constants.Color.DEFAULT
             ):
                 # get values
-                at = attr | curses.color_pair(self._window._color(color_f, color_b))
+                at = attr | _curses.color_pair(self._window._color(color_f, color_b))
                 y_draw = y_top + self.y_start
                 x_draw = x_left + self.x_start
                 length = length if length != 0 else self.x_size - x_draw
                 # split to lines
-                strs = wcwidth.split(string, -1 if not wrap else length)
+                strs = _wcwidth.split(string, -1 if not wrap else length)
                 # cut to canvas size
                 if x_draw < 0:
                     for i in range(len(strs)):
-                        strs[i] = wcwidth.slise(strs[i], -x_draw, self.x_size)
+                        strs[i] = _wcwidth.slise(strs[i], -x_draw, self.x_size)
                 else:
                     for i in range(len(strs)):
-                        strs[i] = wcwidth.slise(strs[i], 0, self.x_size - x_draw)
+                        strs[i] = _wcwidth.slise(strs[i], 0, self.x_size - x_draw)
                 # move cursor after cutting
                 x_draw = max(0, x_draw)
                 # draw strings
                 self._temp.resize(self.y_size, self.x_size)
                 for i in strs:
                     if y_draw == self.y_size:
-                        self._temp.refresh()
                         break
-
-                    self._temp.addstr(y_draw, x_draw, i, at)
+                    try:
+                        self._temp.addstr(y_draw, x_draw, i, at)
+                    except _curses.error:
+                        pass
                     y_draw += 1
+                self._temp.refresh()
 
             def draw_border(self):
                 self._temp.resize(self.y_size, self.x_size)
@@ -453,19 +457,14 @@ class WLabel(Widget):
     def __init__(self, s='', locator: _Callable = lambda x, y: (0, 0)):
         Widget.__init__(self, locator)
         self.text = s
-        self.len = 0
 
     def on_draw(self):
-        x1, _ = self.canvas.xy_position
-        self.canvas.draw_str(self.text, x_left=10, y_top=5, color_f=constants.Color.WEAK_GREEN)
-        x2, _ = self.canvas.xy_position
-        self.len = x2 - x1
-        self.window.log('draw')
+        self.canvas.draw_str(self.text)
 
     def set_str(self, s):
-        self.text = s
         if self.canvas is not None:
-            self.canvas.draw_str(' ' * self.len)
+            self.canvas.draw_str(' ' * _wcwidth.width(self.text))
+            self.text = s
             self.canvas.draw_str(s)
 
 
@@ -478,8 +477,8 @@ class WButton(WBoundary):
     def __init__(
             self, text, width=1, auto=True, keys=None,
             exe: _Callable = lambda: (), locator: _Callable = lambda x, y: (0, 0),
-            color_normal_f=constants.Color.DEFAULT, color_normal_b=constants.Color.DEFAULT,
-            color_focused_f=constants.Color.CYAN, color_focused_b=constants.Color.DEFAULT
+            color_normal_f=_constants.Color.DEFAULT, color_normal_b=_constants.Color.DEFAULT,
+            color_focused_f=_constants.Color.CYAN, color_focused_b=_constants.Color.DEFAULT
     ):
         WBoundary.__init__(self, locator)
         self.text = text
@@ -491,7 +490,7 @@ class WButton(WBoundary):
         self.cnb = color_normal_b
         self.cff = color_focused_f
         self.cfb = color_focused_b
-        self.pos_x = 0
+        self.pos_x = width if not auto else 2 * width + _wcwidth.width(text)
 
     def on_focused(self) -> bool:
         self.on_draw()
@@ -508,11 +507,14 @@ class WButton(WBoundary):
 
     def on_mouse(self, x, y, state):
         if super().encloses(x, y):
-            if state == constants.Button.B1_PRESSED:
+            if state == _constants.Button.B1_PRESSED:
                 self.window.focus = self
-            elif state == constants.Button.B1_RELEASED and self.window.focus is self:
+                return True
+            elif state == _constants.Button.B1_RELEASED and self.window.focus is self:
                 self.exe()
                 self.window.focus = None
+                return True
+        return False
 
     def on_draw(self):
         if self.window.focus is self:
@@ -524,11 +526,9 @@ class WButton(WBoundary):
 
         if self.auto:
             s = (self.width * ' ') + self.text + (self.width * ' ')
-            f = not self.canvas.draw_str(s, color_f=cf, color_b=cb, wrap=False)
-            self.pos_x = self.canvas.xy_position[0] - f
+            self.canvas.draw_str(s, color_f=cf, color_b=cb, wrap=False)
         else:
-            f = not self.canvas.draw_str(self.width * ' ', color_f=cf, color_b=cb)
-            self.pos_x = self.canvas.xy_position[0] - f
+            self.canvas.draw_str(self.width * ' ', color_f=cf, color_b=cb)
             self.canvas.draw_str(self.text, color_f=cf, color_b=cb)
 
     @property
@@ -545,8 +545,8 @@ class WText(WBoundary):
     def __init__(
             self, secret=False,
             locator: _Callable = lambda x, y: (0, 0), sizer: _Callable = lambda x, y: (x, y),
-            color_normal_f=constants.Color.DEFAULT, color_normal_b=constants.Color.DEFAULT,
-            color_focused_f=constants.Color.DEFAULT, color_focused_b=constants.Color.DEFAULT,
+            color_normal_f=_constants.Color.DEFAULT, color_normal_b=_constants.Color.DEFAULT,
+            color_focused_f=_constants.Color.DEFAULT, color_focused_b=_constants.Color.DEFAULT,
     ):
         super().__init__(locator, sizer)
         self.secret = secret
@@ -554,22 +554,31 @@ class WText(WBoundary):
         self.pos = (0, 0)
         self.lines: [str] = ['']
         self.inv = True
-        self.timer = Timer(500, self._inv)
+        self.Timer = Timer(500, self._inv)
         self.cnf = color_normal_f
         self.cnb = color_normal_b
         self.cff = color_focused_f
         self.cfb = color_focused_b
+        self.cmd = {
+            chr(127): self.op_backspace,
+            '\n': self.op_enter,
+            _constants.Key.UP: self.op_cursor_up,
+            _constants.Key.DOWN: self.op_cursor_down,
+            _constants.Key.LEFT: self.op_cursor_left,
+            _constants.Key.RIGHT: self.op_cursor_right
+        }
 
     def on_mouse(self, x, y, state):
         if super().encloses(x, y):
-            if state == constants.Button.B1_PRESSED:
+            if state == _constants.Button.B1_PRESSED:
+                self.cursor = self._get_cursor_at(x, y)
+                self._cursor_refresh()
                 self.window.focus = self
-        else:
-            if self.window.focus is self:
-                self.window.focus = None
+            return True
+        return False
 
     def on_refresh(self) -> None:
-        self.timer.trigger()
+        self.Timer.trigger()
 
     def on_draw(self) -> None:
         self.canvas.clear()
@@ -582,36 +591,37 @@ class WText(WBoundary):
             if self.cursor[1] == i:
                 csr = self.cursor[0]
                 inv = self.inv and self.window.focus is self
-                att = constants.Attibute.REVERSE if inv else constants.Attibute.NORMAL  # TODO selection
-                self.canvas.draw_str(s[:csr], x_left=-self.pos[0], y_top=i - self.pos[1], wrap=False)
-                self.canvas.draw_str(s[csr] if csr < len(s) else ' ', attr=att, absolute=False, wrap=False)
-                self.canvas.draw_str(s[csr + 1:] if csr < len(s) else '', absolute=False, wrap=False)
+                att = _constants.Attibute.REVERSE if inv else _constants.Attibute.NORMAL  # TODO selection
+                x = -self.pos[0]
+                y = i - self.pos[1]
+                l = s[:csr]
+                c = s[csr] if csr < len(s) else ' '
+                r = s[csr + 1:] if csr < len(s) else ''
+                length = _wcwidth.width(l)
+                self.canvas.draw_str(l, x_left=x, y_top=y, wrap=False)
+                self.canvas.draw_str(c, x_left=x + length, y_top=y, attr=att, wrap=False)
+                self.canvas.draw_str(r, x_left=x + length + _wcwidth.width(c), y_top=y, wrap=False)
             else:
                 self.canvas.draw_str(s, x_left=-self.pos[0], y_top=i - self.pos[1], wrap=False)
 
     def on_key(self, ch) -> bool:
-        if self.window.focus is self:
-            if isinstance(ch, str):
-                if ascii.isascii(ch):
-                    if ascii.isprint(ch):
+        if self is self.window.focus:
+            cmd = self.cmd.get(ch)
+            if cmd is not None:
+                cmd()
+                self._cursor_refresh()
+                return True
+            elif isinstance(ch, str):
+                if _ascii.isascii(ch):
+                    if _ascii.isprint(ch):
                         self.add_char(ch)
                         self._cursor_refresh()
                         return True
-                    else:
-                        if self._cmd_char(ch):
-                            self._cursor_refresh()
-                            return True
-                        else:
-                            return False
                 else:
                     self.add_char(ch)
-                    return True
-            else:
-                if self._cmd_int(ch):
                     self._cursor_refresh()
                     return True
-                else:
-                    return False
+        return False
 
     def on_unfocused(self, w) -> bool:
         self.on_draw()
@@ -622,16 +632,22 @@ class WText(WBoundary):
         return True
 
     def add_char(self, ch):
-        s = self.lines[self.cursor[1]]
-        self.lines[self.cursor[1]] = s[:self.cursor[0]] + ch + s[self.cursor[0]:]
-        self.cursor = (self.cursor[0] + 1, self.cursor[1])
+        x, y = self.cursor
+        s = self.lines[y]
+        x = min(len(s), x)
+        self.lines[y] = s[:x] + ch + s[x:]
+        self.cursor = (x + 1, y)
+
+    def _get_cursor_at(self, x, y):
+        xp, yp = self.pos
+        return x - xp, min(len(self.lines) - 1, y - yp)
 
     def _cursor_refresh(self):
         self.inv = True
         self._pos_move_no_trailing()
         self._pos_move_show_cursor()
         self.on_draw()
-        self.timer.reset()
+        self.Timer.reset()
 
     def _pos_move_show_cursor(self):
         x, y = self.cursor
@@ -666,74 +682,64 @@ class WText(WBoundary):
 
         self.pos = (xl, yt)
 
-    def _cmd_char(self, ch) -> bool:
+    def op_backspace(self):
         x, y = self.cursor
-
-        if ch == chr(127):
-            s = self.lines[y]
-            if len(s) != 0:
-                if x >= len(s):
-                    self.lines[y] = s[:-1]
-                    self.cursor = (len(s) - 1, y)
-                    return True
-                else:
-                    self.lines[y] = s[:x - 1] + s[x:]
-                    self.cursor = (x - 1, y)
-                    return True
+        s = self.lines[y]
+        if len(s) != 0:
+            if x >= len(s):
+                self.lines[y] = s[:-1]
+                self.cursor = (len(s) - 1, y)
             else:
-                if y != 0:
-                    self.cursor = (len(self.lines[y - 1]), y - 1)
-                    self.lines[y - 1] += self.lines[y]
-                    self.lines.pop(y)
-                    return True
-        elif ch == '\n':
-            s = self.lines[y]
-            self.lines[y] = s[:x]
-            self.lines.insert(y + 1, s[x:])
-            self.cursor = (0, y + 1)
-            return True
+                self.lines[y] = s[:x - 1] + s[x:]
+                self.cursor = (x - 1, y)
+        else:
+            if y != 0:
+                self.cursor = (len(self.lines[y - 1]), y - 1)
+                self.lines[y - 1] += self.lines[y]
+                self.lines.pop(y)
 
-        return False
+    def op_enter(self):
+        x, y = self.cursor
+        s = self.lines[y]
+        self.lines[y] = s[:x]
+        self.lines.insert(y + 1, s[x:])
+        self.cursor = (0, y + 1)
 
-    def _cmd_int(self, i) -> bool:
+    def op_cursor_up(self):
+        x, y = self.cursor
+        if y != 0:
+            self.cursor = (x, y - 1)
+        else:
+            self.cursor = (0, 0)
+
+    def op_cursor_down(self):
+        x, y = self.cursor
+        if y != len(self.lines) - 1:
+            self.cursor = (x, y + 1)
+        else:
+            self.cursor = (len(self.lines[-1]), y)
+
+    def op_cursor_left(self):
         x, y = self.cursor
         l = len(self.lines[y])
 
-        if i == constants.Key.UP:
+        if x == 0:
             if y != 0:
-                self.cursor = (x, y - 1)
-                return True
-            else:
-                self.cursor = (0, 0)
-                return True
-        elif i == constants.Key.DOWN:
-            if y != len(self.lines) - 1:
-                self.cursor = (x, y + 1)
-                return True
-            else:
-                self.cursor = (len(self.lines[-1]), y)
-                return True
-        elif i == constants.Key.LEFT:
-            if x == 0:
-                if y != 0:
-                    self.cursor = (len(self.lines[y - 1]), y - 1)
-                    return True
-            elif x >= l:
-                self.cursor = (l - 1, y)
-                return True
-            else:
-                self.cursor = (x - 1, y)
-                return True
-        elif i == constants.Key.RIGHT:
-            if x >= l:
-                if y != len(self.lines) - 1:
-                    self.cursor = (0, y + 1)
-                    return True
-            else:
-                self.cursor = (x + 1, y)
-                return True
+                self.cursor = (len(self.lines[y - 1]), y - 1)
+        elif x >= l:
+            self.cursor = (l - 1, y)
+        else:
+            self.cursor = (x - 1, y)
 
-        return False
+    def op_cursor_right(self):
+        x, y = self.cursor
+        l = len(self.lines[y])
+
+        if x >= l:
+            if y != len(self.lines) - 1:
+                self.cursor = (0, y + 1)
+        else:
+            self.cursor = (x + 1, y)
 
 
 class WDebug(Widget):
@@ -747,6 +753,7 @@ class WDebug(Widget):
 
     def on_mouse(self, x, y, state):
         self.window.log('Mouse: ({:d}, {:d}), {:d}'.format(x, y, state))
+        return False
 
 
 class WCBordered(WContainer):
