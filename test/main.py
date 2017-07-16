@@ -35,12 +35,13 @@ def f1():
         w.pause()
         # w.add_widget(b)
         # b.add_widget(WTest())
+        i = gpx.WInterface()
 
         # p = gpx.WContainer(lambda a, b: (0.25 * a, 0.25 * b), lambda a, b: (0.25 * a, 0.25 * b))
         # p.add_widget(WClick())
         # p.add_widget(Wm())
         # w.add_widget(p)
-        w.add_widget(ws)
+        i.add_widget(ws)
         #
         # b = gpx.WCBordered(lambda a, b: (0.25 * a, 0.25 * b), sizer_widget=lambda a, b: (30, 20))
         # l = gpx.WLabel()
@@ -48,7 +49,7 @@ def f1():
         # b.add_widget(l)
         # w.add_widget(b)
         #
-        w.add_widget(gpx.WDebug())
+        i.add_widget(gpx.WDebug())
 
         # def func(): f[0] = False
 
@@ -59,7 +60,8 @@ def f1():
         # w.add_widget(WDButton(lambda a, b: (2, 4), 'log', func1))
 
         # w.add_widget(WTest())
-        w.add_widget(gpx.WText(sizer=lambda x, y: (10, 5)))
+        i.add_widget(gpx.WText(sizer=lambda x, y: (10, 5)))
+        w.interface = i
         w.serve(lambda: f[0] == True)
 
 

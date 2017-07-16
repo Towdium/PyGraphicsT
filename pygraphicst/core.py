@@ -4,6 +4,7 @@ import math as _math
 import time as _time
 import typing as _typing
 from typing import Callable as _Callable
+from typing import Optional as _Optional
 
 import pygraphicst.constants as _constants
 import pygraphicst.wcwidth as _wcwidth
@@ -83,7 +84,7 @@ class Widget:
         self.canvas = None
         self.locator = locator
         self.x_left = self.y_top = 0
-        self.window = None
+        self.container = None
 
     def on_refresh(self) -> None:
         pass
@@ -111,8 +112,8 @@ class Widget:
     def on_unfocused(self, w: 'Widget') -> bool:
         return False
 
-    def on_window(self, window):
-        self.window = window
+    def on_container(self, container):
+        self.container = container
 
     @property
     def xy_position(self) -> [int, int]:
@@ -124,15 +125,12 @@ class Window:
 
     def __init__(self, logger: _Callable = lambda s: ()):
         self._window = None
-        self._line = None
-        self._widgets: [Widget] = []
         self.key_lsnr: [_Callable] = []
         self.mouse_lsnr = []
         self.logger = Logger(logger)
         self.dirty = False
-        self._focus: Widget = None
-        self._cursor_ = (-1, -1)
         self.period = 0.02
+        self._interface: WInterface = None
 
     def __enter__(self):
         self.initialize()
@@ -154,11 +152,6 @@ class Window:
         if log:
             self.log('Resumed')
 
-    def add_widget(self, w: Widget):
-        self._widgets.append(w)
-        w.on_window(self)
-        self.dirty = True
-
     def log(self, s, type_=0, delay=False):
         self.logger.log(s, type_)
         if delay:
@@ -173,14 +166,8 @@ class Window:
             if c == _curses.KEY_MOUSE:
                 try:
                     _, x, y, _, state = _curses.getmouse()
-
-                    def f(w: Widget):
-                        xw, yw = w.xy_position
-                        return w.on_mouse(x - xw, y - yw, state)
-
-                    if not _dist(self._widgets, f):
+                    if not self.interface.on_mouse(x, y, state):
                         _dist(self.mouse_lsnr, lambda l: l(x, y, state))
-                        self.focus = None
 
                 except _curses.error:
                     pass
@@ -189,13 +176,13 @@ class Window:
             elif c == _curses.KEY_RESIZE:
                 self._window.clear()
                 y, x = self._window.getmaxyx()
-                _dist(self._widgets, _call(lambda w: w.on_layout(x, y)))
-                _dist(self._widgets, _call(lambda w: w.on_canvas(self._canvas(*w.xy_position))))
-                _dist(self._widgets, _call(lambda w: w.on_draw()))
+                self.interface.on_layout(x, y)
+                self.interface.on_canvas(self._canvas(0, 0))
+                self.interface.on_draw()
 
             # key event
             else:
-                if not _dist(self._widgets, lambda w: w.on_key(c)):
+                if not self.interface.on_key(c):
                     _dist(self.key_lsnr, lambda w: w(c))
 
         while True:
@@ -219,7 +206,7 @@ class Window:
             # _time check
             td = t - _time.time()
             if td <= 0:
-                _dist(self._widgets, lambda w: w.on_refresh())
+                self.interface.on_refresh()
                 t += self.period
                 td += self.period
                 while td <= 0:
@@ -350,29 +337,18 @@ class Window:
         return Cvs(self, x_left_, y_top_, x_size_, y_size_, x_start_, y_start_)
 
     @property
-    def focus(self) -> Widget:
-        return self._focus
-
-    @focus.setter
-    def focus(self, w: Widget or None):
-        if self._focus is w:
-            return
-
-        f = self._focus
-        self._focus = w
-
-        if f is not None:
-            if not f.on_unfocused(w):
-                self._focus = f
-                return
-
-        if w is not None:
-            if not w.on_focused():
-                self._focus = None
-
-    @property
     def xy_size(self):
         return self._window.getmaxyx()[::-1]
+
+    @property
+    def interface(self):
+        return self._interface
+
+    @interface.setter
+    def interface(self, interface: 'WInterface'):
+        self._interface = interface
+        self._interface.on_window(self)
+        self.dirty = True
 
 
 class WBoundary(Widget):
@@ -407,12 +383,12 @@ class WContainer(WBoundary):
     ):
         WBoundary.__init__(self, locator, sizer)
         self._widgets: [Widget] = []
+        self._focus = None
 
     def add_widget(self, w: Widget):
         self._widgets.append(w)
-        if self.window is not None:
-            w.on_window(self.window)
-            self.window.dirty = True
+        w.on_container(self)
+        self.mark_dirty()
 
     def on_draw(self) -> None:
         _dist(self._widgets, _call(lambda w: w.on_draw()))
@@ -427,7 +403,11 @@ class WContainer(WBoundary):
                 xw, yw = w.xy_position
                 return w.on_mouse(x - xw, y - yw, state)
 
-            return _dist(self._widgets, f)
+            if not _dist(self._widgets, f):
+                self.focus = None
+                return False
+            else:
+                return True
         else:
             return False
 
@@ -447,10 +427,61 @@ class WContainer(WBoundary):
     def on_refresh(self) -> None:
         _dist(self._widgets, _call(lambda w: w.on_refresh()))
 
-    def on_window(self, window):
-        super().on_window(window)
+    def on_container(self, container):
+        super().on_container(container)
         for i in self._widgets:
-            i.on_window(window)
+            i.on_container(container)
+
+    @property
+    def focus(self) -> _Optional[Widget]:
+        if self.container is None or self.container.focus is self:
+            return self._focus
+        else:
+            return None
+
+    @focus.setter
+    def focus(self, w: Widget or None):
+        if self._focus is w:
+            return
+
+        if self.container is not None:
+            self.container.focus = self
+            if self.container.focus is not self:
+                return
+
+        f = self._focus
+        self._focus = w
+
+        if f is not None:
+            if not f.on_unfocused(w):
+                self._focus = f
+                return
+
+        if w is not None:
+            if not w.on_focused():
+                self._focus = None
+
+    def mark_dirty(self):
+        self.container.mark_dirty()
+
+    def log(self, s, type_=0, delay=False):
+        self.container.log(s, type_, delay)
+
+
+class WInterface(WContainer):
+    def __init__(self):
+        WContainer.__init__(self, lambda a, b: (0, 0), lambda a, b: (a, b))
+        self.window = None
+
+    def on_window(self, window):
+        self.window = window
+
+    def log(self, s, type_=0, delay=False):
+        self.window.log(s, type_, delay)
+
+    def mark_dirty(self):
+        if self.window is not None:
+            self.window.dirty = True
 
 
 class WLabel(Widget):
@@ -508,16 +539,16 @@ class WButton(WBoundary):
     def on_mouse(self, x, y, state):
         if super().encloses(x, y):
             if state == _constants.Button.B1_PRESSED:
-                self.window.focus = self
+                self.container.focus = self
                 return True
-            elif state == _constants.Button.B1_RELEASED and self.window.focus is self:
+            elif state == _constants.Button.B1_RELEASED and self.container.focus is self:
                 self.exe()
-                self.window.focus = None
+                self.container.focus = None
                 return True
         return False
 
     def on_draw(self):
-        if self.window.focus is self:
+        if self.container.focus is self:
             cf = self.cff
             cb = self.cfb
         else:
@@ -538,7 +569,7 @@ class WButton(WBoundary):
 
 class WText(WBoundary):
     def _inv(self):
-        if self.window.focus is self:
+        if self.container.focus is self:
             self.inv = not self.inv
             self.on_draw()
 
@@ -573,12 +604,25 @@ class WText(WBoundary):
             if state == _constants.Button.B1_PRESSED:
                 self.cursor = self._get_cursor_at(x, y)
                 self._cursor_refresh()
-                self.window.focus = self
+                self.container.focus = self
             return True
         return False
 
     def on_refresh(self) -> None:
         self.Timer.trigger()
+
+    def _get_index(self, x, y):
+        s = self.lines[y]
+        csr, _ = _wcwidth.index(s, self.cursor[0], True)
+        csr = csr if csr != -1 else len(s)
+        return csr, y
+
+    def _get_char_at(self, x, y):
+        s = self.lines[y]
+        if x == len(s):
+            return ' '
+        else:
+            return s[x]
 
     def on_draw(self) -> None:
         self.canvas.clear()
@@ -589,8 +633,8 @@ class WText(WBoundary):
 
             s = self.lines[i]
             if self.cursor[1] == i:
-                csr = self.cursor[0]
-                inv = self.inv and self.window.focus is self
+                csr, _ = self._get_index(*self.cursor)
+                inv = self.inv and self.container.focus is self
                 att = _constants.Attibute.REVERSE if inv else _constants.Attibute.NORMAL  # TODO selection
                 x = -self.pos[0]
                 y = i - self.pos[1]
@@ -605,7 +649,7 @@ class WText(WBoundary):
                 self.canvas.draw_str(s, x_left=-self.pos[0], y_top=i - self.pos[1], wrap=False)
 
     def on_key(self, ch) -> bool:
-        if self is self.window.focus:
+        if self is self.container.focus:
             cmd = self.cmd.get(ch)
             if cmd is not None:
                 cmd()
@@ -633,14 +677,14 @@ class WText(WBoundary):
 
     def add_char(self, ch):
         x, y = self.cursor
+        x_, y_ = self._get_index(*self.cursor)
         s = self.lines[y]
-        x = min(len(s), x)
-        self.lines[y] = s[:x] + ch + s[x:]
-        self.cursor = (x + 1, y)
+        self.cursor = (_wcwidth.width(s[:x_] + ch), y_)
+        self.lines[y] = s[:x_] + ch + s[x_:]
 
     def _get_cursor_at(self, x, y):
         xp, yp = self.pos
-        return x - xp, min(len(self.lines) - 1, y - yp)
+        return x + xp, min(len(self.lines) - 1, y + yp)
 
     def _cursor_refresh(self):
         self.inv = True
@@ -651,6 +695,7 @@ class WText(WBoundary):
 
     def _pos_move_show_cursor(self):
         x, y = self.cursor
+        w = _wcwidth.width(self._get_char_at(*self._get_index(x, y)))  # TODO
         xl, yt = self.pos
         xr = xl + self.x_size
         yb = yt + self.y_size
@@ -658,6 +703,7 @@ class WText(WBoundary):
         if x < xl:
             self.pos = (x, self.pos[1])
         elif x >= xr:
+            x += w - 1
             self.pos = (x - self.x_size + 1, self.pos[1])
 
         if y < yt:
@@ -672,7 +718,7 @@ class WText(WBoundary):
         x_max = 0
 
         for i in self.lines:
-            x_max = max(x_max, len(i))
+            x_max = max(x_max, _wcwidth.width(i))
 
         if yb > len(self.lines):
             yt = max(0, len(self.lines) - self.y_size)
@@ -685,25 +731,27 @@ class WText(WBoundary):
     def op_backspace(self):
         x, y = self.cursor
         s = self.lines[y]
-        if len(s) != 0:
-            if x >= len(s):
+        if x != 0:
+            l = _wcwidth.width(s)
+            if x >= l:
                 self.lines[y] = s[:-1]
-                self.cursor = (len(s) - 1, y)
+                self.cursor = (l - 1, y)
             else:
-                self.lines[y] = s[:x - 1] + s[x:]
-                self.cursor = (x - 1, y)
+                x_, y_ = self._get_index(x, y)
+                self.cursor = (x - _wcwidth.width(self._get_char_at(x_ - 1, y_)), y)
+                self.lines[y] = s[:x_ - 1] + s[x_:]
         else:
             if y != 0:
-                self.cursor = (len(self.lines[y - 1]), y - 1)
+                self.cursor = (_wcwidth.width(self.lines[y - 1]), y - 1)
                 self.lines[y - 1] += self.lines[y]
                 self.lines.pop(y)
 
     def op_enter(self):
-        x, y = self.cursor
-        s = self.lines[y]
-        self.lines[y] = s[:x]
-        self.lines.insert(y + 1, s[x:])
-        self.cursor = (0, y + 1)
+        x_, y_ = self._get_index(*self.cursor)
+        s = self.lines[y_]
+        self.lines[y_] = s[:x_]
+        self.lines.insert(y_ + 1, s[x_:])
+        self.cursor = (0, y_ + 1)
 
     def op_cursor_up(self):
         x, y = self.cursor
@@ -717,29 +765,31 @@ class WText(WBoundary):
         if y != len(self.lines) - 1:
             self.cursor = (x, y + 1)
         else:
-            self.cursor = (len(self.lines[-1]), y)
+            self.cursor = (_wcwidth.width(self.lines[-1]), y)
 
     def op_cursor_left(self):
         x, y = self.cursor
-        l = len(self.lines[y])
+        l = _wcwidth.width(self.lines[y])
+        x_, y_ = self._get_index(x, y)
+        w = _wcwidth.width(self._get_char_at(x_ - 1, y_))
 
         if x == 0:
             if y != 0:
                 self.cursor = (len(self.lines[y - 1]), y - 1)
         elif x >= l:
-            self.cursor = (l - 1, y)
+            self.cursor = (l - w, y)
         else:
-            self.cursor = (x - 1, y)
+            self.cursor = (x - w, y)
 
     def op_cursor_right(self):
         x, y = self.cursor
-        l = len(self.lines[y])
+        l = _wcwidth.width(self.lines[y])
 
         if x >= l:
             if y != len(self.lines) - 1:
                 self.cursor = (0, y + 1)
         else:
-            self.cursor = (x + 1, y)
+            self.cursor = (x + _wcwidth.width(self._get_char_at(*self._get_index(*self.cursor))), y)
 
 
 class WDebug(Widget):
@@ -748,11 +798,11 @@ class WDebug(Widget):
         if isinstance(ch, str) and len(ch) == 1:
             s += ', ord: {:d}'.format(ord(ch))
 
-        self.window.log(s)
+        self.container.log(s)
         return False
 
     def on_mouse(self, x, y, state):
-        self.window.log('Mouse: ({:d}, {:d}), {:d}'.format(x, y, state))
+        self.container.log('Mouse: ({:d}, {:d}), {:d}'.format(x, y, state))
         return False
 
 
