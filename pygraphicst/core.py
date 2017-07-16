@@ -91,7 +91,7 @@ class Widget:
     def __init__(self, locator: _Callable = lambda x, y: (0, 0)):
         self.canvas = None
         self.locator = locator
-        self.x_left = self.y_top = 0
+        self.x_left = self.y_top = -1
         self.container = None
 
     def on_refresh(self) -> None:
@@ -123,6 +123,9 @@ class Widget:
     def on_container(self, container):
         self.container = container
 
+    def on_next(self) -> bool:
+        return False
+
     @property
     def xy_position(self) -> [int, int]:
         return self.x_left, self.y_top
@@ -136,7 +139,6 @@ class Window:
         self.key_lsnr: [_Callable] = []
         self.mouse_lsnr = []
         self.logger = Logger(logger)
-        self.dirty = False
         self.period = 0.02
         self.cursor = (-1, -1)
         self._interface: WInterface = None
@@ -195,8 +197,6 @@ class Window:
                     _dist(self.key_lsnr, lambda w: w(c))
 
         while True:
-            self.dirty = False
-
             if c != _constants.Key.ERR:
 
                 # enter unify
@@ -204,10 +204,6 @@ class Window:
                     c = '\n'
 
                 run()
-
-                if self.dirty:
-                    c = _curses.KEY_RESIZE
-                    continue
 
             if not cond():
                 break
@@ -227,11 +223,11 @@ class Window:
             self._window.timeout(timeout)
 
             # cursor
-            y, x = self._window.getmaxyx()
-            x_, y_ = self.cursor
-            if 0 <= x_ < x and 0 <= y_ < y:
+            ym, xm = self._window.getmaxyx()
+            xc, yc = self.cursor
+            if 0 <= xc < xm and 0 <= yc < ym:
                 _curses.curs_set(1)
-                self._window.move(y_, x_)
+                self._window.move(yc, xc)
             else:
                 _curses.curs_set(0)
 
@@ -352,7 +348,12 @@ class Window:
 
             # relative position
             def canvas(self, x_left, y_top, x_size, y_size, x_start, y_start):
-                return Cvs(self._window, self.x_left + x_left, self.y_top + y_top, x_size, y_size, x_start, y_start)
+                if x_left + x_size > self.x_size or y_top + y_size > self.y_size:
+                    raise ValueError("Sub-panel boundary exceeds parent's.")
+                return Cvs(
+                    self._window, self.x_left + x_left + self.x_start, self.y_top + y_top + self.y_start,
+                    x_size, y_size, x_start, y_start
+                )
 
             def clear(self):
                 self._temp.resize(self.y_size, self.x_size)
@@ -377,7 +378,6 @@ class Window:
     def interface(self, interface: 'WInterface'):
         self._interface = interface
         self._interface.on_window(self)
-        self.dirty = True
 
 
 class WBoundary(Widget):
@@ -417,7 +417,10 @@ class WContainer(WBoundary):
     def add_widget(self, w: Widget):
         self._widgets.append(w)
         w.on_container(self)
-        self.mark_dirty()
+        if self.x_left != -1 and self.y_top != -1:
+            w.on_layout(*self.xy_size)
+        if self.canvas is not None:
+            w.on_canvas(self.canvas.canvas(0, 0, *self.xy_size, *w.xy_position))
 
     def on_draw(self) -> None:
         _dist(self._widgets, _call(lambda w: w.on_draw()))
@@ -460,9 +463,6 @@ class WContainer(WBoundary):
         super().on_container(container)
         for i in self._widgets:
             i.on_container(container)
-
-    def mark_dirty(self):
-        self.container.mark_dirty()
 
     def log(self, s, type_=0, delay=False):
         self.container.log(s, type_, delay)
@@ -515,11 +515,29 @@ class WContainer(WBoundary):
             if not w.on_focused():
                 self._focus = None
 
+    def on_next(self) -> bool:
+        start = -1 if self.focus is None else self._widgets.index(self.focus)
+        if self.focus.on_next():
+            return True
+        else:
+            for i in range(start + 1, len(self._widgets)):
+                self._focus = self._widgets[i]
+                if self._focus.on_focused():
+                    return True
+                else:
+                    self._focus = None
+            return False
+
 
 class WInterface(WContainer):
-    def __init__(self):
+    def __init__(self, parent: _Optional['WInterface']):
         WContainer.__init__(self, lambda a, b: (0, 0), lambda a, b: (a, b))
         self.window = None
+        self.parent = parent
+        self.cmd = {
+            chr(127): self.op_back,
+            '\t': self.on_next
+        }
 
     def on_window(self, window):
         self.window = window
@@ -527,9 +545,12 @@ class WInterface(WContainer):
     def log(self, s, type_=0, delay=False):
         self.window.log(s, type_, delay)
 
-    def mark_dirty(self):
-        if self.window is not None:
-            self.window.dirty = True
+    def op_back(self):
+        pass  # TODO
+
+    def op_next(self):
+        if not self.on_next():
+            self.on_next()
 
 
 class WLabel(Widget):
@@ -874,3 +895,38 @@ class WCBordered(WContainer):
         self.canvas.clear()
         self.painter(self.canvas, *self.xy_size)
         super().on_draw()
+
+
+class WSelect(WContainer):
+    def __init__(self, locator, sizer, items: _typing.List[_typing.Tuple[str, _Callable]] = None):
+        WContainer.__init__(self, locator, sizer)
+        self.items = items if items is not None else []
+        self.index = 0
+        self.list = []
+
+    def on_layout(self, x, y) -> None:
+        super().on_layout(x, y)
+        self._arrange()
+
+    def _arrange(self):
+        x, y = self.xy_size
+        for i in range(self.index, min(len(self.items), self.index + y)):
+            b = WButton(text=self.items[i - self.index][0], auto=False, width=x,
+                        locator=lambda a, b: (0, i - self.index))
+            self.add_widget(b)
+            self.list.append(b)
+
+    def on_key(self, ch: int) -> bool:
+        if not super().on_key(ch):
+            if ch == _constants.Key.UP:
+                index = self.list.index(self.focus)
+                self.focus = self.list[index - 1]
+                return True
+            elif ch == _constants.Key.DOWN:
+                index = self.list.index(self.focus)
+                self.focus = self.list[index - len(self.list) + 1]
+                return True
+            else:
+                return False
+        else:
+            return True

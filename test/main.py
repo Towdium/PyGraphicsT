@@ -35,7 +35,7 @@ def f1():
         w.pause()
         # w.add_widget(b)
         # b.add_widget(WTest())
-        i = gpx.WInterface()
+        i = gpx.WInterface(None)
 
         # p = gpx.WContainer(lambda a, b: (0.25 * a, 0.25 * b), lambda a, b: (0.25 * a, 0.25 * b))
         # p.add_widget(WClick())
@@ -50,6 +50,8 @@ def f1():
         # w.add_widget(b)
         #
         i.add_widget(gpx.WDebug())
+        i.add_widget(gpx.WSelect(locator=lambda a, b: (0, 0), sizer=lambda a, b: (a / 2, b / 2),
+                                 items=[('a', lambda: True), ('b', lambda: True)]))
 
         # def func(): f[0] = False
 
@@ -60,7 +62,7 @@ def f1():
         # w.add_widget(WDButton(lambda a, b: (2, 4), 'log', func1))
 
         # w.add_widget(WTest())
-        i.add_widget(gpx.WText(sizer=lambda x, y: (10, 5)))
+        # i.add_widget(gpx.WText(sizer=lambda x, y: (10, 5)))
         w.interface = i
         w.serve(lambda: f[0] == True)
 
