@@ -110,7 +110,7 @@ class Widget:
         return False
 
     def on_unfocused(self, w: 'Widget') -> bool:
-        return False
+        return True
 
     def on_container(self, container):
         self.container = container
@@ -432,6 +432,30 @@ class WContainer(WBoundary):
         for i in self._widgets:
             i.on_container(container)
 
+    def mark_dirty(self):
+        self.container.mark_dirty()
+
+    def log(self, s, type_=0, delay=False):
+        self.container.log(s, type_, delay)
+
+    def on_focused(self) -> bool:
+        if self._focus is None:
+            for i in self._widgets:
+                self._focus = i
+                if i.on_focused():
+                    return True
+                else:
+                    self._focus = None
+            return False
+        else:
+            return self._focus.on_focused()
+
+    def on_unfocused(self, w: Widget) -> bool:
+        if self._focus is None:
+            return True
+        else:
+            return self._focus.on_unfocused(w)
+
     @property
     def focus(self) -> _Optional[Widget]:
         if self.container is None or self.container.focus is self:
@@ -440,17 +464,18 @@ class WContainer(WBoundary):
             return None
 
     @focus.setter
-    def focus(self, w: Widget or None):
+    def focus(self, w: _Optional[Widget]):
         if self._focus is w:
             return
+
+        f = self._focus
+        self._focus = w
 
         if self.container is not None:
             self.container.focus = self
             if self.container.focus is not self:
+                self._focus = f
                 return
-
-        f = self._focus
-        self._focus = w
 
         if f is not None:
             if not f.on_unfocused(w):
@@ -460,12 +485,6 @@ class WContainer(WBoundary):
         if w is not None:
             if not w.on_focused():
                 self._focus = None
-
-    def mark_dirty(self):
-        self.container.mark_dirty()
-
-    def log(self, s, type_=0, delay=False):
-        self.container.log(s, type_, delay)
 
 
 class WInterface(WContainer):
@@ -613,7 +632,7 @@ class WText(WBoundary):
 
     def _get_index(self, x, y):
         s = self.lines[y]
-        csr, _ = _wcwidth.index(s, self.cursor[0], True)
+        csr, _ = _wcwidth.index(s, x, True)
         csr = csr if csr != -1 else len(s)
         return csr, y
 
