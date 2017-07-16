@@ -1,6 +1,7 @@
 import curses as _curses
 import curses.ascii as _ascii
 import math as _math
+import re as _re
 import time as _time
 import typing as _typing
 from typing import Callable as _Callable
@@ -10,6 +11,7 @@ import pygraphicst.constants as _constants
 import pygraphicst.wcwidth as _wcwidth
 
 N = _typing.TypeVar('N', int, float)
+_pattern_backspace = _re.compile('.' + chr(127))
 
 
 def _dist(items, exe):
@@ -66,6 +68,12 @@ class Canvas:
         pass
 
     def draw_border(self):
+        pass
+
+    def cursor_set(self, x, y):
+        pass
+
+    def cursor_unset(self):
         pass
 
     def clear(self):
@@ -130,6 +138,7 @@ class Window:
         self.logger = Logger(logger)
         self.dirty = False
         self.period = 0.02
+        self.cursor = (-1, -1)
         self._interface: WInterface = None
 
     def __enter__(self):
@@ -217,6 +226,15 @@ class Window:
             timeout = _math.ceil(td * 1000)
             self._window.timeout(timeout)
 
+            # cursor
+            y, x = self._window.getmaxyx()
+            x_, y_ = self.cursor
+            if 0 <= x_ < x and 0 <= y_ < y:
+                _curses.curs_set(1)
+                self._window.move(y_, x_)
+            else:
+                _curses.curs_set(0)
+
             try:
                 c = self._window.get_wch()
             except _curses.error:
@@ -288,6 +306,11 @@ class Window:
                     color_f: int = _constants.Color.DEFAULT,
                     color_b: int = _constants.Color.DEFAULT
             ):
+                # handle backspace
+                string = _pattern_backspace.sub('', string)
+                if len(string) > 0 and string[0] == '\b':
+                    string = string[1:]
+
                 # get values
                 at = attr | _curses.color_pair(self._window._color(color_f, color_b))
                 y_draw = y_top + self.y_start
@@ -320,6 +343,12 @@ class Window:
                 self._temp.resize(self.y_size, self.x_size)
                 self._temp.border()
                 self._temp.refresh()
+
+            def cursor_set(self, x, y):
+                self._window.cursor = self.x_left + self.x_start + x, self.y_top + self.y_start + y
+
+            def cursor_unset(self):
+                self._window.cursor = (-1, -1)
 
             # relative position
             def canvas(self, x_left, y_top, x_size, y_size, x_start, y_start):
@@ -646,26 +675,16 @@ class WText(WBoundary):
     def on_draw(self) -> None:
         self.canvas.clear()
 
-        for i in range(self.pos[1], self.pos[1] + self.xy_size[1]):
-            if i >= len(self.lines):
-                break
-
+        for i in range(self.pos[1], min(self.pos[1] + self.xy_size[1], len(self.lines))):
             s = self.lines[i]
-            if self.cursor[1] == i:
-                csr, _ = self._get_index(*self.cursor)
-                inv = self.inv and self.container.focus is self
-                att = _constants.Attibute.REVERSE if inv else _constants.Attibute.NORMAL  # TODO selection
-                x = -self.pos[0]
-                y = i - self.pos[1]
-                l = s[:csr]
-                c = s[csr] if csr < len(s) else ' '
-                r = s[csr + 1:] if csr < len(s) else ''
-                length = _wcwidth.width(l)
-                self.canvas.draw_str(l, x_left=x, y_top=y, wrap=False)
-                self.canvas.draw_str(c, x_left=x + length, y_top=y, attr=att, wrap=False)
-                self.canvas.draw_str(r, x_left=x + length + _wcwidth.width(c), y_top=y, wrap=False)
-            else:
-                self.canvas.draw_str(s, x_left=-self.pos[0], y_top=i - self.pos[1], wrap=False)
+            self.canvas.draw_str(s, x_left=-self.pos[0], y_top=i - self.pos[1], wrap=False)
+
+        if self is self.container.focus:
+            xp, yp = self.pos
+            xc, yc = self.cursor
+            self.canvas.cursor_set(min(_wcwidth.width(self.lines[yc]), xc) - xp, yc - yp)
+        else:
+            self.canvas.cursor_unset()
 
     def on_key(self, ch) -> bool:
         if self is self.container.focus:
@@ -714,7 +733,7 @@ class WText(WBoundary):
 
     def _pos_move_show_cursor(self):
         x, y = self.cursor
-        w = _wcwidth.width(self._get_char_at(*self._get_index(x, y)))  # TODO
+        w = _wcwidth.width(self._get_char_at(*self._get_index(x, y)))
         xl, yt = self.pos
         xr = xl + self.x_size
         yb = yt + self.y_size
@@ -736,8 +755,8 @@ class WText(WBoundary):
         yb = yt + self.y_size
         x_max = 0
 
-        for i in self.lines:
-            x_max = max(x_max, _wcwidth.width(i))
+        for i in range(len(self.lines)):
+            x_max = max(x_max, _wcwidth.width(self.lines[i]) + (0 if self.cursor[1] != i else 1))
 
         if yb > len(self.lines):
             yt = max(0, len(self.lines) - self.y_size)
@@ -754,7 +773,7 @@ class WText(WBoundary):
             l = _wcwidth.width(s)
             if x >= l:
                 self.lines[y] = s[:-1]
-                self.cursor = (l - 1, y)
+                self.cursor = (l - _wcwidth.width(s[-1]), y)
             else:
                 x_, y_ = self._get_index(x, y)
                 self.cursor = (x - _wcwidth.width(self._get_char_at(x_ - 1, y_)), y)
