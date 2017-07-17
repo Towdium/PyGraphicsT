@@ -41,7 +41,7 @@ def f1():
         # p.add_widget(WClick())
         # p.add_widget(Wm())
         # w.add_widget(p)
-        i.add_widget(ws)
+        i.widget_add(ws)
         #
         # b = gpx.WCBordered(lambda a, b: (0.25 * a, 0.25 * b), sizer_widget=lambda a, b: (30, 20))
         # l = gpx.WLabel()
@@ -49,9 +49,10 @@ def f1():
         # b.add_widget(l)
         # w.add_widget(b)
         #
-        i.add_widget(gpx.WDebug())
-        i.add_widget(gpx.WSelect(locator=lambda a, b: (0, 0), sizer=lambda a, b: (a / 2, b / 2),
-                                 items=[('a', lambda: True), ('b', lambda: True)]))
+        i.widget_add(gpx.WDebug())
+        s = gpx.WSelect(locator=lambda a, b: (a / 4, b / 4), sizer=lambda a, b: (a / 2, b / 2),
+                        items=[('a', lambda: True), ('b', lambda: True)])
+        i.widget_add(s)
 
         # def func(): f[0] = False
 
@@ -64,6 +65,7 @@ def f1():
         # w.add_widget(WTest())
         # i.add_widget(gpx.WText(sizer=lambda x, y: (10, 5)))
         w.interface = i
+        i.focus = s
         w.serve(lambda: f[0] == True)
 
 

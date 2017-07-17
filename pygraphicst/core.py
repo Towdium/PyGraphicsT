@@ -283,17 +283,13 @@ class Window:
                 self._window = window
                 self.x_left = x_left
                 self.y_top = y_top
-                self._temp = window._window.subwin(y_top, x_left)
-                y, x = self._temp.getmaxyx()
-                self.x_size = x if x_size == 0 else x_size
-                self.y_size = y if y_size == 0 else y_size
-                try:
-                    self._temp.resize(self.y_size, self.x_size)
-                except _curses.error:
+                y, x = self._window._window.getmaxyx()
+                self.x_size = x - x_left if x_size == 0 else x_size
+                self.y_size = y - y_top if y_size == 0 else y_size
+                if x_left + x_size > x or y_top + y_size > y:
                     raise ValueError('Size exceeds.')
                 self.x_start = x_start
                 self.y_start = y_start
-                self.cursor = (0, 0)
 
             def draw_str(
                     self, string: str, x_left: int = 0, y_top: int = 0,
@@ -309,9 +305,9 @@ class Window:
 
                 # get values
                 at = attr | _curses.color_pair(self._window._color(color_f, color_b))
-                y_draw = y_top + self.y_start
-                x_draw = x_left + self.x_start
-                length = length if length != 0 else self.x_size - x_draw
+                y_draw = y_top + self.y_start + self.y_top
+                x_draw = x_left + self.x_start + self.x_left
+                length = length if length != 0 else self.x_size - x_left - self.x_start
                 # split to lines
                 strs = _wcwidth.split(string, -1 if not wrap else length)
                 # cut to canvas size
@@ -324,21 +320,20 @@ class Window:
                 # move cursor after cutting
                 x_draw = max(0, x_draw)
                 # draw strings
-                self._temp.resize(self.y_size, self.x_size)
                 for i in strs:
                     if y_draw == self.y_size:
                         break
                     try:
-                        self._temp.addstr(y_draw, x_draw, i, at)
+                        self._window._window.addstr(y_draw, x_draw, i, at)
                     except _curses.error:
                         pass
                     y_draw += 1
-                self._temp.refresh()
+                self._window._window.refresh()
 
             def draw_border(self):
-                self._temp.resize(self.y_size, self.x_size)
-                self._temp.border()
-                self._temp.refresh()
+                w = self._window._window.subwin(self.y_size, self.x_size, self.y_top, self.x_left)
+                w.border()
+                w.refresh()
 
             def cursor_set(self, x, y):
                 self._window.cursor = self.x_left + self.x_start + x, self.y_top + self.y_start + y
@@ -356,13 +351,9 @@ class Window:
                 )
 
             def clear(self):
-                self._temp.resize(self.y_size, self.x_size)
-                self._temp.clear()
-                self._temp.refresh()
-
-            @property
-            def xy_position(self):
-                return self.cursor
+                w = self._window._window.subwin(self.y_size, self.x_size, self.y_top, self.x_left)
+                w.clear()
+                w.refresh()
 
         return Cvs(self, x_left_, y_top_, x_size_, y_size_, x_start_, y_start_)
 
@@ -414,13 +405,18 @@ class WContainer(WBoundary):
         self._widgets: [Widget] = []
         self._focus = None
 
-    def add_widget(self, w: Widget):
+    def widget_add(self, w: Widget):
         self._widgets.append(w)
         w.on_container(self)
         if self.x_left != -1 and self.y_top != -1:
             w.on_layout(*self.xy_size)
         if self.canvas is not None:
             w.on_canvas(self.canvas.canvas(0, 0, *self.xy_size, *w.xy_position))
+        if (self.container is None or self.container.focus is self) and self.focus is None:
+            self.focus = w
+
+    def widget_remove(self, w: Widget):
+        self._widgets.remove(w)
 
     def on_draw(self) -> None:
         _dist(self._widgets, _call(lambda w: w.on_draw()))
@@ -469,13 +465,16 @@ class WContainer(WBoundary):
 
     def on_focused(self) -> bool:
         if self._focus is None:
-            for i in self._widgets:
-                self._focus = i
-                if i.on_focused():
-                    return True
-                else:
-                    self._focus = None
-            return False
+            if len(self._widgets) == 0:
+                return True
+            else:
+                for i in self._widgets:
+                    self._focus = i
+                    if i.on_focused():
+                        return True
+                    else:
+                        self._focus = None
+                return False
         else:
             return self._focus.on_focused()
 
@@ -593,7 +592,8 @@ class WButton(WBoundary):
         self.pos_x = width if not auto else 2 * width + _wcwidth.width(text)
 
     def on_focused(self) -> bool:
-        self.on_draw()
+        if self.canvas is not None:
+            self.on_draw()
         return True
 
     def on_unfocused(self, w) -> bool:
@@ -912,12 +912,12 @@ class WSelect(WContainer):
         x, y = self.xy_size
         for i in range(self.index, min(len(self.items), self.index + y)):
             b = WButton(text=self.items[i - self.index][0], auto=False, width=x,
-                        locator=lambda a, b: (0, i - self.index))
-            self.add_widget(b)
+                        locator=lambda x_, y_: (0, i - self.index))
+            self.widget_add(b)
             self.list.append(b)
 
     def on_key(self, ch: int) -> bool:
-        if not super().on_key(ch):
+        if not super().on_key(ch) and (self.container is None or self.container.focus is self):
             if ch == _constants.Key.UP:
                 index = self.list.index(self.focus)
                 self.focus = self.list[index - 1]
@@ -929,4 +929,4 @@ class WSelect(WContainer):
             else:
                 return False
         else:
-            return True
+            return False
