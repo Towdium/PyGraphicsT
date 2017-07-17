@@ -279,11 +279,10 @@ class Window:
     def _canvas(self, x_left_=0, y_top_=0, x_size_=0, y_size_=0, x_start_=0, y_start_=0):
         class Cvs(Canvas):
             # absolute position
-            def __init__(self, window: 'Window', x_left=0, y_top=0, x_size=0, y_size=0, x_start=0, y_start=0):
-                self._window = window
+            def __init__(self, x_left=0, y_top=0, x_size=0, y_size=0, x_start=0, y_start=0):
                 self.x_left = x_left
                 self.y_top = y_top
-                y, x = self._window._window.getmaxyx()
+                y, x = Window.INSTANCE._window.getmaxyx()
                 self.x_size = x - x_left if x_size == 0 else x_size
                 self.y_size = y - y_top if y_size == 0 else y_size
                 if x_left + x_size > x or y_top + y_size > y:
@@ -304,7 +303,7 @@ class Window:
                     string = string[1:]
 
                 # get values
-                at = attr | _curses.color_pair(self._window._color(color_f, color_b))
+                at = attr | _curses.color_pair(Window.INSTANCE._color(color_f, color_b))
                 y_draw = y_top + self.y_start + self.y_top
                 x_draw = x_left + self.x_start + self.x_left
                 length = length if length != 0 else self.x_size - x_left - self.x_start
@@ -324,38 +323,38 @@ class Window:
                     if y_draw == self.y_size:
                         break
                     try:
-                        self._window._window.addstr(y_draw, x_draw, i, at)
+                        Window.INSTANCE._window.addstr(y_draw, x_draw, i, at)
                     except _curses.error:
                         pass
                     y_draw += 1
-                self._window._window.refresh()
+                Window.INSTANCE._window.refresh()
 
             def draw_border(self):
-                w = self._window._window.subwin(self.y_size, self.x_size, self.y_top, self.x_left)
+                w = Window.INSTANCE._window.subwin(self.y_size, self.x_size, self.y_top, self.x_left)
                 w.border()
                 w.refresh()
 
             def cursor_set(self, x, y):
-                self._window.cursor = self.x_left + self.x_start + x, self.y_top + self.y_start + y
+                Window.INSTANCE.cursor = self.x_left + self.x_start + x, self.y_top + self.y_start + y
 
             def cursor_unset(self):
-                self._window.cursor = (-1, -1)
+                Window.INSTANCE.cursor = (-1, -1)
 
             # relative position
             def canvas(self, x_left, y_top, x_size, y_size, x_start, y_start):
                 if x_left + x_size > self.x_size or y_top + y_size > self.y_size:
                     raise ValueError("Sub-panel boundary exceeds parent's.")
                 return Cvs(
-                    self._window, self.x_left + x_left + self.x_start, self.y_top + y_top + self.y_start,
+                    self.x_left + x_left + self.x_start, self.y_top + y_top + self.y_start,
                     x_size, y_size, x_start, y_start
                 )
 
             def clear(self):
-                w = self._window._window.subwin(self.y_size, self.x_size, self.y_top, self.x_left)
+                w = Window.INSTANCE._window.subwin(self.y_size, self.x_size, self.y_top, self.x_left)
                 w.clear()
                 w.refresh()
 
-        return Cvs(self, x_left_, y_top_, x_size_, y_size_, x_start_, y_start_)
+        return Cvs(x_left_, y_top_, x_size_, y_size_, x_start_, y_start_)
 
     @property
     def xy_size(self):
@@ -417,6 +416,9 @@ class WContainer(WBoundary):
 
     def widget_remove(self, w: Widget):
         self._widgets.remove(w)
+
+    def widget_clear(self):
+        self._widgets.clear()
 
     def on_draw(self) -> None:
         _dist(self._widgets, _call(lambda w: w.on_draw()))
@@ -612,7 +614,6 @@ class WButton(WBoundary):
                 return True
             elif state == _constants.Button.B1_RELEASED and self.container.focus is self:
                 self.exe()
-                self.container.focus = None
                 return True
         return False
 
@@ -865,44 +866,88 @@ class WDebug(Widget):
         return False
 
 
-class WCBordered(WContainer):
-    def __init__(
-            self, locator: _Callable = lambda x, y: (0, 0),
-            sizer_widget: _Callable = lambda x, y: (x, y),
-            sizer_border: _Callable = lambda x, y: (1, 1, 1, 1),
-            painter: _Callable = lambda c, x, y: c.draw_border()
-    ):
-        super().__init__(locator, sizer_widget)
-        self.sizer_b = sizer_border
-        self.b_top = self.b_right = self.b_bottom = self.b_left = 0
-        self.painter = painter
+class WWrapper(WContainer):
+    def on_container(self, container):
+        WBoundary.on_container(self, container)
+        self.widget.on_container(self)
 
-    def on_layout(self, x, y) -> None:
-        super().on_layout(x, y)
-        self.b_top, self.b_right, self.b_bottom, self.b_left = self.sizer_b(x, y)
+    def on_focused(self) -> bool:
+        return self.widget.on_focused()
+
+    def on_unfocused(self, w: 'Widget') -> bool:
+        return self.widget.on_unfocused(w)
+
+    def encloses(self, x, y) -> bool:
+        return WBoundary.encloses(self, x, y)
+
+    def on_mouse(self, x, y, state) -> bool:
+        return self.widget.on_mouse(x, y, state)
 
     def on_canvas(self, canvas: Canvas) -> None:
-        Widget.on_canvas(self, canvas.canvas(0, 0, *self.xy_size, 0, 0))
-        x, y = self.xy_size
-        xs = x - self.b_left - self.b_right
-        ys = y - self.b_top - self.b_bottom
-
-        _dist(self._widgets, _call(lambda w: w.on_canvas(
-            canvas.canvas(self.b_left, self.b_top, xs, ys, *w.xy_position)
-        )))
+        WBoundary.on_canvas(self, canvas)
+        self.widget.on_canvas(self.canvas.canvas(
+            self.bl, self.bt, self.x_size - self.bl - self.bt, self.y_size - self.bt - self.bb, 0, 0
+        ))
 
     def on_draw(self) -> None:
-        self.canvas.clear()
-        self.painter(self.canvas, *self.xy_size)
-        super().on_draw()
+        self.widget.on_draw()
+        self.painter(self.canvas)
+
+    def on_refresh(self) -> None:
+        self.widget.on_refresh()
+
+    def on_layout(self, x, y):
+        WBoundary.on_layout(self, x, y)
+        self.widget.on_layout(self.x_size - self.bl - self.br, self.y_size - self.bt - self.bb)
+
+    def on_next(self) -> bool:
+        return self.widget.on_next()
+
+    def on_key(self, ch) -> bool:
+        return self.widget.on_key(ch)
+
+    def __init__(
+            self, widget: Widget,
+            locator: _Callable = lambda x, y: (0, 0),
+            sizer_w: _Callable = lambda x, y: (x, y),
+            sizer_b: _Callable = lambda x, y: (0, 0, 0, 0),
+            painter: _Callable = lambda p: True
+    ):
+        WBoundary.__init__(self, locator, sizer_w)
+        self.sizer_b = sizer_b
+        self.widget = widget
+        self.painter = painter
+        self.bl = self.br = self.bt = self.bb = 0
+
+    @property
+    def focus(self) -> _Optional[Widget]:
+        if self is self.container.focus:
+            return self.widget
+        else:
+            return None
+
+    @focus.setter
+    def focus(self, w):
+        if w is not self.widget and Window.INSTANCE is not None:
+            Window.INSTANCE.log("Do you really want to call this? I'm a wrapper.")
+
+    def widget_clear(self):
+        self.container.widget_clear()
+
+    def widget_add(self, w: Widget):
+        self.container.widget_add(w)
+
+    def widget_remove(self, w: Widget):
+        self.container.widget_remove(w)
 
 
-class WSelect(WContainer):
+class WSelect(WWrapper):
     def __init__(self, locator, sizer, items: _typing.List[_typing.Tuple[str, _Callable]] = None):
-        WContainer.__init__(self, locator, sizer)
+        WWrapper.__init__(self, WContainer(), locator, sizer)
         self.items = items if items is not None else []
         self.index = 0
         self.list = []
+        self.widget: WContainer = self.widget
 
     def on_layout(self, x, y) -> None:
         super().on_layout(x, y)
@@ -910,22 +955,56 @@ class WSelect(WContainer):
 
     def _arrange(self):
         x, y = self.xy_size
+        self.widget.widget_clear()
+        self.list.clear()
         for i in range(self.index, min(len(self.items), self.index + y)):
-            b = WButton(text=self.items[i - self.index][0], auto=False, width=x,
+            b = WButton(text=self.items[i][0], auto=False, width=x,
                         locator=lambda x_, y_: (0, i - self.index))
-            self.widget_add(b)
+            self.widget.widget_add(b)
             self.list.append(b)
 
     def on_key(self, ch: int) -> bool:
         if not super().on_key(ch) and (self.container is None or self.container.focus is self):
             if ch == _constants.Key.UP:
-                index = self.list.index(self.focus)
-                self.focus = self.list[index - 1]
-                return True
+                index = self.list.index(self.widget.focus)
+                if index == 0:
+                    if self.index > 0:
+                        self.index -= 1
+                        self._arrange()
+                        self.widget.focus = self.list[index]
+                        self.canvas.clear()
+                        self.on_draw()
+                        return True
+                    else:
+                        self.index = len(self.items) - self.y_size
+                        self._arrange()
+                        self.widget.focus = self.list[-1]
+                        self.canvas.clear()
+                        self.on_draw()
+                        return True
+                else:
+                    self.widget.focus = self.list[index - 1]
+                    return True
             elif ch == _constants.Key.DOWN:
-                index = self.list.index(self.focus)
-                self.focus = self.list[index - len(self.list) + 1]
-                return True
+                index = self.list.index(self.widget.focus)
+                if index == self.y_size - 1:
+                    if self.index + self.y_size < len(self.items):
+                        self.index += 1
+                        self._arrange()
+                        self.widget.focus = self.list[index]
+                        self.canvas.clear()
+                        self.on_draw()
+                        return True
+                    else:
+                        self.index = 0
+                        self._arrange()
+                        self.widget.focus = self.list[0]
+                        self.canvas.clear()
+                        self.on_draw()
+                        return True
+                else:
+                    self.widget.focus = self.list[index - len(self.list) + 1]
+                    return True
             else:
                 return False
         else:

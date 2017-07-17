@@ -30,8 +30,6 @@ def f1():
         def lsnr(c): f[0] = c != '\n'
 
         w.key_lsnr.append(lsnr)
-
-        b = gpx.WCBordered(sizer_widget=lambda x, y: (x / 2, y / 2))
         w.pause()
         # w.add_widget(b)
         # b.add_widget(WTest())
@@ -50,8 +48,8 @@ def f1():
         # w.add_widget(b)
         #
         i.widget_add(gpx.WDebug())
-        s = gpx.WSelect(locator=lambda a, b: (a / 4, b / 4), sizer=lambda a, b: (a / 2, b / 2),
-                        items=[('a', lambda: True), ('b', lambda: True)])
+        s = gpx.WSelect(locator=lambda a, b: (a / 4, b / 4), sizer=lambda a, b: (a / 2, 3),
+                        items=[('a', lambda: True), ('b', lambda: True), ('c', lambda: True), ('d', lambda: True)])
         i.widget_add(s)
 
         # def func(): f[0] = False
