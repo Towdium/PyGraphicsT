@@ -321,7 +321,7 @@ class Window:
                         strs[i] = _wcwidth.slise(strs[i], -x_draw, self.x_size)
                 else:
                     for i in range(len(strs)):
-                        strs[i] = _wcwidth.slise(strs[i], 0, self.x_size - x_draw)
+                        strs[i] = _wcwidth.slise(strs[i], 0, self.x_size - x_left - self.x_start)
                 # move cursor after cutting
                 x_draw = max(0, x_draw)
                 # draw strings
@@ -643,11 +643,11 @@ class WStatus(WLabel):
 class WButton(WBoundary):
     def __init__(
             self, text, width=1, auto=True, keys=None,
-            exe: _Callable = lambda: (), locator: _Callable = lambda x, y: (0, 0),
+            exe: _Callable = lambda: (), locator: _Callable = lambda x, y, w: (0, 0),
             color_normal_f=_constants.Color.DEFAULT, color_normal_b=_constants.Color.DEFAULT,
             color_focused_f=_constants.Color.CYAN, color_focused_b=_constants.Color.DEFAULT
     ):
-        WBoundary.__init__(self, locator)
+        WBoundary.__init__(self, lambda x, y: locator(x, y, self.pos_x))
         self.text = text
         self.exe = exe
         self.keys = keys if keys is not None else []
@@ -984,7 +984,7 @@ class WWrapper(WContainer):
     ):
         WBoundary.__init__(self, locator, sizer_w)
         self.sizer_b = sizer_b
-        self.widget = widget
+        self._widget = widget
         self.painter = painter
         self.bl = self.br = self.bt = self.bb = 0
 
@@ -1000,14 +1000,40 @@ class WWrapper(WContainer):
         if w is not self.widget and Window.INSTANCE is not None:
             Window.INSTANCE.log("Do you really want to call this? I'm a wrapper.")
 
+    @property
+    def widget(self):
+        return self._widget
+
+    @widget.setter
+    def widget(self, widget):
+        w = self._widget
+        self._widget = widget
+        if self.container is not None and (self is self.container.focus and not w.on_unfocused(widget)):
+            raise RuntimeError('Widget refuses to release focus.')
+
+        if Window.INSTANCE.state != Window.STATE_INIT:
+            self._widget.on_layout(*self.xy_size)
+        if Window.INSTANCE.state == Window.STATE_SERVE:
+            if self.canvas is None:
+                raise RuntimeError('The WWrapper don\'t have canvas. Maybe it\'s not correctly added.')
+
+            c = self.canvas.canvas(
+                self.bl, self.bt, self.x_size - self.bl - self.bt, self.y_size - self.bt - self.bb, 0, 0
+            )
+            c.clear()
+            self._widget.on_canvas(c)
+            self._widget.on_draw()
+            if self is self.container.focus:
+                self._widget.on_focused()
+
     def widget_clear(self):
-        self.container.widget_clear()
+        Window.INSTANCE.log("Do you really want to call this? I'm a wrapper.")
 
     def widget_add(self, w: Widget):
-        self.container.widget_add(w)
+        Window.INSTANCE.log("Do you really want to call this? I'm a wrapper.")
 
     def widget_remove(self, w: Widget):
-        self.container.widget_remove(w)
+        Window.INSTANCE.log("Do you really want to call this? I'm a wrapper.")
 
 
 class WSelect(WWrapper):
@@ -1082,3 +1108,60 @@ class WSelect(WWrapper):
                 return False
         else:
             return False
+
+
+class WPager(WWrapper):
+    # getter = callable: page (int) -> content (widget)
+    def __init__(
+            self, getter: _Callable, page=0, size=-1, buffered=True,
+            locator: _Callable = lambda x, y: (0, 0),
+            sizer: _Callable = lambda x, y: (x, y)
+    ):
+        super().__init__(Widget(), locator, sizer)
+        self.getter = getter
+        self.page = page
+        self.size = size
+        self._buffered = buffered
+        self.buffer = {}
+        self.page_set(page)
+
+    def page_set(self, n):
+        self._range_check(n)
+        self.page = n
+        if self.buffered:
+            w = self.buffer.get(n)
+            if w is not None:
+                self.widget = w
+            else:
+                self.buffer[n] = self.getter(n)
+                self.widget = self.buffer[n]
+        else:
+            self.widget = self.getter(n)
+
+    def page_prev(self):
+        self.page_set(self.page - 1)
+
+    def page_next(self):
+        self.page_set(self.page + 1)
+
+    def page_has_prev(self):
+        return self.page > 0
+
+    def page_has_next(self):
+        return self.page + 1 < self.size
+
+    def _range_check(self, n):
+        if self.size == -1:
+            return
+        if not 0 <= n < self.size:
+            raise ValueError('Index exceeds boundary.')
+
+    @property
+    def buffered(self):
+        return self._buffered
+
+    @buffered.setter
+    def buffered(self, b):
+        if not b:
+            self.buffer.clear()
+        self._buffered = b

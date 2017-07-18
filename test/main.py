@@ -3,6 +3,29 @@ import curses
 import pygraphicst as gpx
 
 
+def f3():
+    with gpx.Window(lambda a, b: ()) as w:
+        w.pause()
+        f = [True]
+        i = gpx.WInterface(None)
+        w.interface = i
+
+        # noinspection PyDefaultArgument
+        def get(n, w=gpx.WLabel('')):
+            w.set_str(str(n))
+            return w
+
+        wp = gpx.WPager(get, sizer=lambda x, y: (0, 5), buffered=False)
+        i.widget_add(gpx.WButton('>', locator=lambda x, y, w: (x - 2 - w, y - 2), exe=lambda: wp.page_next()))
+        i.widget_add(gpx.WButton('<', locator=lambda x, y, w: (2, y - 2), exe=lambda: wp.page_prev()))
+        i.widget_add(wp)
+
+        def lsnr(ch): f[0] = ch != '\n'
+
+        w.key_lsnr.append(lsnr)
+        w.serve(lambda: f[0])
+
+
 def f1():
     class WClick(gpx.Widget):
         def on_mouse(self, x, y, state) -> bool:
@@ -84,4 +107,4 @@ def f2():
     curses.wrapper(main)
 
 
-f1()
+f3()
