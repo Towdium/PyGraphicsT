@@ -133,6 +133,9 @@ class Widget:
 
 class Window:
     INSTANCE: 'Window' = None
+    STATE_INIT = 0
+    STATE_LAYOUT = 1
+    STATE_SERVE = 2
 
     def __init__(self, logger: _Callable = lambda s: ()):
         self._window = None
@@ -142,6 +145,7 @@ class Window:
         self.period = 0.02
         self.cursor = (-1, -1)
         self._interface: WInterface = None
+        self.state = 0
 
     def __enter__(self):
         self.initialize()
@@ -185,11 +189,13 @@ class Window:
 
             # resize event
             elif c == _curses.KEY_RESIZE:
-                self._window.clear()
                 y, x = self._window.getmaxyx()
+                self.state = Window.STATE_LAYOUT
                 self.interface.on_layout(x, y)
+                self._window.clear()
                 self.interface.on_canvas(self._canvas(0, 0))
                 self.interface.on_draw()
+                self.state = Window.STATE_SERVE
 
             # key event
             else:
@@ -407,18 +413,38 @@ class WContainer(WBoundary):
     def widget_add(self, w: Widget):
         self._widgets.append(w)
         w.on_container(self)
-        if self.x_left != -1 and self.y_top != -1:
+        if Window.INSTANCE.state is not Window.STATE_INIT and self.x_left != -1 and self.y_top != -1:
             w.on_layout(*self.xy_size)
-        if self.canvas is not None:
+        if Window.INSTANCE.state is Window.STATE_SERVE and self.canvas is not None:
             w.on_canvas(self.canvas.canvas(0, 0, *self.xy_size, *w.xy_position))
-        if (self.container is None or self.container.focus is self) and self.focus is None:
-            self.focus = w
+            w.on_draw()
 
     def widget_remove(self, w: Widget):
-        self._widgets.remove(w)
+        if self.focus is w:
+            self.focus = None
+            if self.focus is not None:
+                raise RuntimeError('Window focus refuses to release.')
+            self._widgets.remove(w)
+            for i in self._widgets:
+                self.focus = i
+                if self.focus is i:
+                    return
+        else:
+            self._widgets.remove(w)
+
+        if self.canvas is not None and Window.INSTANCE.state is not Window.STATE_LAYOUT:
+            self.canvas.clear()
+            self.on_draw()
 
     def widget_clear(self):
         self._widgets.clear()
+        self.focus = None
+        if self.focus is not None:
+            raise RuntimeError('Window focus refuses to release.')
+
+        if self.canvas is not None and Window.INSTANCE.state is not Window.STATE_LAYOUT:
+            self.canvas.clear()
+            self.on_draw()
 
     def on_draw(self) -> None:
         _dist(self._widgets, _call(lambda w: w.on_draw()))
@@ -907,7 +933,7 @@ class WWrapper(WContainer):
         return self.widget.on_key(ch)
 
     def __init__(
-            self, widget: Widget,
+            self, widget,
             locator: _Callable = lambda x, y: (0, 0),
             sizer_w: _Callable = lambda x, y: (x, y),
             sizer_b: _Callable = lambda x, y: (0, 0, 0, 0),
@@ -947,7 +973,6 @@ class WSelect(WWrapper):
         self.items = items if items is not None else []
         self.index = 0
         self.list = []
-        self.widget: WContainer = self.widget
 
     def on_layout(self, x, y) -> None:
         super().on_layout(x, y)
@@ -955,6 +980,7 @@ class WSelect(WWrapper):
 
     def _arrange(self):
         x, y = self.xy_size
+        index = self.list.index(self.widget.focus) if self.widget.focus is not None else 0
         self.widget.widget_clear()
         self.list.clear()
         for i in range(self.index, min(len(self.items), self.index + y)):
@@ -962,6 +988,7 @@ class WSelect(WWrapper):
                         locator=lambda x_, y_: (0, i - self.index))
             self.widget.widget_add(b)
             self.list.append(b)
+        self.widget.focus = self.list[min(len(self.list) - 1, index)]
 
     def on_key(self, ch: int) -> bool:
         if not super().on_key(ch) and (self.container is None or self.container.focus is self):
