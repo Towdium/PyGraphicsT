@@ -47,9 +47,16 @@ def f1():
         # b.add_widget(l)
         # w.add_widget(b)
         #
+        i1 = gpx.WInterface(i)
+        i1.widget_add(gpx.WLabel('Hey!'))
+        i1.widget_add(ws)
+
+        def f1():
+            w.interface = i1
+
         i.widget_add(gpx.WDebug())
         s = gpx.WSelect(locator=lambda a, b: (a / 4, b / 4), sizer=lambda a, b: (a / 2, 3),
-                        items=[('a', lambda: True), ('b', lambda: True), ('c', lambda: True), ('d', lambda: True)])
+                        items=[('a', lambda: True), ('b', lambda: True), ('c', lambda: True), ('d', f1)])
         i.widget_add(s)
 
         # def func(): f[0] = False

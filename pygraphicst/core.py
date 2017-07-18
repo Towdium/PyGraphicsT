@@ -211,7 +211,7 @@ class Window:
 
                 run()
 
-            if not cond():
+            if not cond() or self.interface is None:
                 break
 
             # _time check
@@ -374,6 +374,11 @@ class Window:
     def interface(self, interface: 'WInterface'):
         self._interface = interface
         self._interface.on_window(self)
+        if self.state == Window.STATE_SERVE:
+            self._interface.on_layout(*self.xy_size)
+            self._window.clear()
+            self._interface.on_canvas(self._canvas(0, 0))
+            self._interface.on_draw()
 
 
 class WBoundary(Widget):
@@ -477,7 +482,7 @@ class WContainer(WBoundary):
     def xy_position(self) -> [int, int]:
         return self.x_left, self.y_top
 
-    def on_key(self, ch: int) -> bool:
+    def on_key(self, ch) -> bool:
         return _dist(self._widgets, lambda w: w.on_key(ch))
 
     def on_refresh(self) -> None:
@@ -514,7 +519,7 @@ class WContainer(WBoundary):
 
     @property
     def focus(self) -> _Optional[Widget]:
-        if self.container is None or self.container.focus is self:
+        if self.container.focus is self:
             return self._focus
         else:
             return None
@@ -527,11 +532,10 @@ class WContainer(WBoundary):
         f = self._focus
         self._focus = w
 
-        if self.container is not None:
-            self.container.focus = self
-            if self.container.focus is not self:
-                self._focus = f
-                return
+        self.container.focus = self
+        if self.container.focus is not self:
+            self._focus = f
+            return
 
         if f is not None:
             if not f.on_unfocused(w):
@@ -573,11 +577,47 @@ class WInterface(WContainer):
         self.window.log(s, type_, delay)
 
     def op_back(self):
-        pass  # TODO
+        self.window.interface = self.parent
 
     def op_next(self):
         if not self.on_next():
             self.on_next()
+
+    def on_active(self):
+        if self.canvas is not None:
+            self.on_draw()
+
+    def on_inactive(self):
+        pass
+
+    def on_key(self, ch) -> bool:
+        if not super().on_key(ch):
+            c = self.cmd.get(ch)
+            if c is not None:
+                c()
+        else:
+            return True
+
+    @property
+    def focus(self) -> _Optional[Widget]:
+        return self._focus
+
+    @focus.setter
+    def focus(self, w: _Optional[Widget]):
+        if self._focus is w:
+            return
+
+        f = self._focus
+        self._focus = w
+
+        if f is not None:
+            if not f.on_unfocused(w):
+                self._focus = f
+                return
+
+        if w is not None:
+            if not w.on_focused():
+                self._focus = None
 
 
 class WLabel(Widget):
@@ -630,6 +670,9 @@ class WButton(WBoundary):
 
     def on_key(self, ch):
         if ch in self.keys:
+            self.exe()
+            return True
+        if self is self.container.focus and ch == '\n':
             self.exe()
             return True
 
@@ -984,14 +1027,17 @@ class WSelect(WWrapper):
         self.widget.widget_clear()
         self.list.clear()
         for i in range(self.index, min(len(self.items), self.index + y)):
-            b = WButton(text=self.items[i][0], auto=False, width=x,
+            b = WButton(text=self.items[i][0], auto=False, width=x, exe=self.items[i][1],
                         locator=lambda x_, y_: (0, i - self.index))
             self.widget.widget_add(b)
             self.list.append(b)
         self.widget.focus = self.list[min(len(self.list) - 1, index)]
 
-    def on_key(self, ch: int) -> bool:
-        if not super().on_key(ch) and (self.container is None or self.container.focus is self):
+    def on_key(self, ch) -> bool:
+        if super().on_key(ch):
+            return True
+
+        if self.container.focus is self:
             if ch == _constants.Key.UP:
                 index = self.list.index(self.widget.focus)
                 if index == 0:
